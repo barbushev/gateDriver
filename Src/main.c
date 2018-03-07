@@ -45,13 +45,13 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
-
+DMA_HandleTypeDef hDmaTimer1;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 static const uint16_t fPeriod = 480;
-static uint16_t pulseWidth = 240;
-
+static volatile uint16_t pulseWidth = 240;
+static uint16_t shiftInPulse[6] = {240, 0, 0, 0, 0, 0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -195,10 +195,11 @@ static void MX_TIM1_Init(void)
 
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_TIM1_CLK_ENABLE();
+
   GPIO_InitTypeDef GPIO_InitStruct;
   GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   htim1.Instance = TIM1;
@@ -236,6 +237,7 @@ static void MX_TIM1_Init(void)
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
 
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+  sConfigOC.Pulse = 0;
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
@@ -252,8 +254,25 @@ static void MX_TIM1_Init(void)
 
   __HAL_AFIO_REMAP_TIM1_PARTIAL();
 
+  // Configure TIM1 DMA
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  hDmaTimer1.Instance = DMA1_Channel4;
+  hDmaTimer1.Init.Direction = DMA_MEMORY_TO_PERIPH;
+  hDmaTimer1.Init.PeriphInc = DMA_PINC_DISABLE;
+  hDmaTimer1.Init.MemInc = DMA_MINC_ENABLE;
+  hDmaTimer1.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+  hDmaTimer1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+  hDmaTimer1.Init.Mode = DMA_CIRCULAR;
+  hDmaTimer1.Init.Priority = DMA_PRIORITY_HIGH;
+  HAL_DMA_Init(&hDmaTimer1);
+
+  __HAL_LINKDMA(&htim1, hdma[TIM_DMA_ID_CC4], hDmaTimer1);
+
+  HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_4, (uint32_t *)shiftInPulse, 6);
+
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-  HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
+  //HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
   //HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   //HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   //HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
