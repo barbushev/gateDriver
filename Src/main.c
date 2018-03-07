@@ -269,7 +269,7 @@ static void MX_TIM1_Init(void)
 
   __HAL_LINKDMA(&htim1, hdma[TIM_DMA_ID_CC4], hDmaTimer1);
 
-  HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_4, (uint32_t *)shiftInPulse, 6);
+  HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_4, (uint32_t *)shiftInPulse, sizeof(shiftInPulse) / sizeof(shiftInPulse[0]));
 
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   //HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
