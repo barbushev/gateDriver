@@ -45,6 +45,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim15;
 DMA_HandleTypeDef hDmaTimer1;
 UART_HandleTypeDef huart3;
 
@@ -52,12 +53,14 @@ UART_HandleTypeDef huart3;
 static const uint16_t fPeriod = 480;
 static volatile uint16_t pulseWidth = 240;
 static uint16_t shiftInPulse[6] = {240, 0, 0, 0, 0, 0};
+uint16_t blinkDelay = 500;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_TIM1_Init(void);
+static void MX_TIM1_InitAsSlave(void);
+static void MX_TIM15_InitAsMaster(void);
 static void MX_USART3_UART_Init(void);
                                 
 
@@ -99,11 +102,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_TIM1_Init();
   MX_USART3_UART_Init();
-  /* USER CODE BEGIN 2 */
 
-  /* USER CODE END 2 */
+  //slave must have its clock running before master
+  MX_TIM1_InitAsSlave();
+  MX_TIM15_InitAsMaster();
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -111,11 +114,11 @@ int main(void)
   {
 	  HAL_GPIO_WritePin(GPIOC, blueLED_Pin, GPIO_PIN_SET);
 	  HAL_GPIO_WritePin(GPIOC, greenLED_Pin, GPIO_PIN_RESET);
-	  HAL_Delay(500);
+	  HAL_Delay(blinkDelay);
 
 	  HAL_GPIO_WritePin(GPIOC, blueLED_Pin, GPIO_PIN_RESET);
 	  HAL_GPIO_WritePin(GPIOC, greenLED_Pin, GPIO_PIN_SET);
-	  HAL_Delay(500);
+	  HAL_Delay(blinkDelay);
   }
   /* USER CODE END 3 */
 
@@ -185,7 +188,7 @@ void SystemClock_Config(void)
 }
 
 /* TIM1 init function */
-static void MX_TIM1_Init(void)
+static void MX_TIM1_InitAsSlave(void)
 {
   // TIM1 GPIO Configuration
   // PA8     ------> TIM1_CH1
@@ -218,8 +221,9 @@ static void MX_TIM1_Init(void)
   HAL_TIM_PWM_Init(&htim1);
 
   TIM_SlaveConfigTypeDef sSlaveConfig;
-  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_DISABLE;
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;  //configure as slave
   sSlaveConfig.InputTrigger = TIM_TS_ITR0;
+  sSlaveConfig.TriggerFilter = 0;
   HAL_TIM_SlaveConfigSynchronization(&htim1, &sSlaveConfig);
 
   TIM_MasterConfigTypeDef sMasterConfig;
@@ -270,7 +274,6 @@ static void MX_TIM1_Init(void)
   __HAL_LINKDMA(&htim1, hdma[TIM_DMA_ID_CC4], hDmaTimer1);
 
   HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_4, (uint32_t *)shiftInPulse, sizeof(shiftInPulse) / sizeof(shiftInPulse[0]));
-
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   //HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
   //HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
@@ -295,6 +298,75 @@ static void MX_USART3_UART_Init(void)
     _Error_Handler(__FILE__, __LINE__);
   }
 
+}
+
+static void MX_TIM15_InitAsMaster(void)
+{
+  // TIM1 GPIO Configuration
+  // PA2     ------> TIM15_CH1
+  // PA3     ------> TIM15_CH2
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_TIM15_CLK_ENABLE();
+
+  GPIO_InitTypeDef GPIO_InitStruct;
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  htim15.Instance = TIM15;
+  htim15.Init.Prescaler = 0;
+  htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim15.Init.Period = fPeriod;
+  htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim15.Init.RepetitionCounter = 0;
+  htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  HAL_TIM_Base_Init(&htim15);
+
+  TIM_ClockConfigTypeDef sClockSourceConfig;
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  HAL_TIM_ConfigClockSource(&htim15, &sClockSourceConfig);
+
+  HAL_TIM_PWM_Init(&htim15);
+
+  TIM_SlaveConfigTypeDef sSlaveConfig;
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_DISABLE;
+  sSlaveConfig.InputTrigger = TIM_TS_NONE;
+  HAL_TIM_SlaveConfigSynchronization(&htim15, &sSlaveConfig);
+
+  TIM_MasterConfigTypeDef sMasterConfig;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_ENABLE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
+  HAL_TIMEx_MasterConfigSynchronization(&htim15, &sMasterConfig);
+
+  TIM_OC_InitTypeDef sConfigOC;
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = pulseWidth;  //pulse width
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+
+  HAL_TIM_PWM_ConfigChannel(&htim15, &sConfigOC, TIM_CHANNEL_1);
+  HAL_TIM_PWM_ConfigChannel(&htim15, &sConfigOC, TIM_CHANNEL_2);
+  HAL_TIM_PWM_ConfigChannel(&htim15, &sConfigOC, TIM_CHANNEL_3);
+  HAL_TIM_PWM_ConfigChannel(&htim15, &sConfigOC, TIM_CHANNEL_4);
+
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_ENABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_ENABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 120;   //5uS - 1/24000000 x 120. SEE RM0041 page 255 and page 278
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_ENABLE;
+  HAL_TIMEx_ConfigBreakDeadTime(&htim15, &sBreakDeadTimeConfig);
+
+  HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_1);
+  //HAL_TIMEx_PWMN_Start(&htim15, TIM_CHANNEL_1);
+  //HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_2);
 }
 
 /** Configure pins as 
